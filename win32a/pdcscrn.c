@@ -4,6 +4,7 @@
 #include <tchar.h>
 #include <stdint.h>
 #include <assert.h>
+#include <commctrl.h>
 
 /* COLOR_PAIR to attribute encoding table. */
 
@@ -97,6 +98,8 @@ int debug_printf( const char *format, ...)
 HWND PDC_hWnd;
 static int PDC_argc = 0;
 static char **PDC_argv = NULL;
+static HWND PDC_resize_tt;
+static TOOLINFO PDC_resize_tt_item;
 
 static void final_cleanup( void)
 {
@@ -1510,6 +1513,18 @@ INLINE void HandleSizing( WPARAM wParam, LPARAM lParam )
     if( wParam == WMSZ_LEFT || wParam == WMSZ_BOTTOMLEFT
                             || wParam == WMSZ_TOPLEFT)
         rect->left = rect->right - rounded_width;
+
+    /* update the resize tooltip to display the new dimensions */
+    SendMessage(PDC_resize_tt, TTM_TRACKACTIVATE, (WPARAM) TRUE,
+                (LPARAM) &PDC_resize_tt_item);
+    char coords[12];
+    snprintf(coords, sizeof(coords), "%d, %d",
+               rounded_width, rounded_height);
+    PDC_resize_tt_item.lpszText = coords;
+    SendMessage(PDC_resize_tt, TTM_SETTOOLINFO, 0,
+                (LPARAM) &PDC_resize_tt_item);
+    SendMessage(PDC_resize_tt, TTM_TRACKPOSITION, 0,
+                (LPARAM) MAKELONG(10, 10));
 }
 
 /* Under Wine,  it appears that the code to force the window size to be
@@ -1540,6 +1555,9 @@ static void HandleSize( const WPARAM wParam, const LPARAM lParam)
 /*  if( wine_version)
         printf( "Wine version: %s\n", wine_version( ));  */
 
+    /* turn off the resize tooltip */
+    SendMessage(PDC_resize_tt, TTM_TRACKACTIVATE, (WPARAM) FALSE,
+                (LPARAM) &PDC_resize_tt_item);
 
     if( wParam == SIZE_MINIMIZED )
     {
@@ -2451,6 +2469,33 @@ INLINE int set_up_window( void)
     AppendMenu( hMenu, MF_STRING, WM_CHOOSE_FONT, _T( "Choose Font"));
 
     debug_printf( "menu set\n");
+
+    PDC_resize_tt = CreateWindowEx(WS_EX_TOPMOST,
+                                   TOOLTIPS_CLASS,
+                                   NULL,
+                                   WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
+                                   CW_USEDEFAULT,
+                                   CW_USEDEFAULT,
+                                   CW_USEDEFAULT,
+                                   CW_USEDEFAULT,
+                                   PDC_hWnd,
+                                   NULL,
+                                   hInstance,
+                                   NULL);
+    if (!PDC_resize_tt) {
+        debug_printf("CreateWindowEx failed; GetLastError = %ld", GetLastError());
+    }
+    else {
+        PDC_resize_tt_item.cbSize = sizeof(TOOLINFO);
+        PDC_resize_tt_item.uFlags = TTF_IDISHWND | TTF_TRACK | TTF_ABSOLUTE;
+        PDC_resize_tt_item.hwnd = PDC_hWnd;
+        PDC_resize_tt_item.hinst = hInstance;
+        PDC_resize_tt_item.lpszText = _T("some crap");
+        PDC_resize_tt_item.uId = (UINT_PTR) PDC_hWnd;
+        GetClientRect(PDC_hWnd, &PDC_resize_tt_item.rect);
+
+        SendMessage(PDC_resize_tt, TTM_ADDTOOL, 0, (LPARAM) (LPTOOLINFO) &PDC_resize_tt_item);
+    }
 
     ShowWindow (PDC_hWnd,
                     (n_default_columns == -1) ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
